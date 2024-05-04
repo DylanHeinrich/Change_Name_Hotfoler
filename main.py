@@ -13,11 +13,12 @@ import logging
 import signal
 import time
 import threading
+import ctypes
 
 logger = logging.getLogger(__name__)
 
 config = configparser.ConfigParser()
-config.read('config Home.ini')
+config.read('config.ini')
 
 CONFIG_SUFFIX = 'Hot Folder Suffix'
 CONFIG_OUTPUT = 'Hot Folder Output'
@@ -25,6 +26,7 @@ CONFIG_LOCATION = 'Hot Folders Location'
 
 PROGRAM_LOCATION = os.getcwd()
 app = None
+t1 = None
 
 class QueueHandler(logging.Handler):
     """Class to send logging records to a queue
@@ -32,10 +34,6 @@ class QueueHandler(logging.Handler):
     It can be used from different threads
     The ConsoleUi class polls this queue to display records in a ScrolledText widget
     """
-    # Example from Moshe Kaplan: https://gist.github.com/moshekaplan/c425f861de7bbf28ef06
-    # (https://stackoverflow.com/questions/13318742/python-logging-to-tkinter-text-widget) is not thread safe!
-    # See https://stackoverflow.com/questions/43909849/tkinter-python-crashes-on-new-thread-trying-to-log-on-main-thread
-
     def __init__(self, log_queue):
         super().__init__()
         self.log_queue = log_queue
@@ -61,7 +59,7 @@ class ConsoleUi:
         # Create a logging handler using a queue
         self.log_queue = queue.Queue()
         self.queue_handler = QueueHandler(self.log_queue)
-        formatter = logging.Formatter('%(asctime)s: %(message)s')
+        formatter = logging.Formatter('%(asctime)s: %(message)s', '%m/%d/%Y %H:%M:%S')
         self.queue_handler.setFormatter(formatter)
         logger.addHandler(self.queue_handler)
         # Start polling messages from the queue
@@ -102,15 +100,15 @@ class ThirdUi:
         tk.Label(self.frame, text = 'Folder Location').place(x = 230, y = 50)
         self.folder_location_entry = tk.Entry(self.frame, textvariable= self.folder_location, width = 35, name = 'folder input entry')
         self.folder_location_entry.pack(pady= 10)
-        ttk.Button(self.frame, text= 'Browse', command= lambda: self.browse_folder('input')).place(x = 575, y = 45)
+        ttk.Button(self.frame, text= 'Browse', command= lambda: self.browse_folder('input'), bootstyle = 'outline').place(x = 575, y = 45)
         tk.Label(self.frame, text= 'Folder Suffix').place(x = 240, y = 90)
         self.suffix_entry = tk.Entry(self.frame, textvariable= self.suffix, width = 35, name = 'folder suffix entry')
         self.suffix_entry.pack(pady= 10)
         tk.Label(self.frame, text= 'Output Folde Location').place(x = 200, y = 130)
         self.folder_output_location_entry = tk.Entry(self.frame, textvariable= self.folder_output_location, width= 35, name = 'folder output entry')
         self.folder_output_location_entry.pack(pady = 10)
-        ttk.Button(self.frame, text = 'Browse', command= lambda: self.browse_folder('output')).place(x = 575, y = 130)
-        ttk.Button(self.frame, text= 'Create Folder', command= self.create_folder).pack()
+        ttk.Button(self.frame, text = 'Browse', command= lambda: self.browse_folder('output'), bootstyle = 'outline').place(x = 575, y = 130)
+        ttk.Button(self.frame, text= 'Create Folder', command= self.create_folder, bootstyle = 'outline').pack(pady = 10)
         
         
     def browse_folder(self, entry_name):
@@ -170,20 +168,32 @@ class App:
         with open(f"{PROGRAM_LOCATION}/myapp.conf", "w") as conf:
             conf.write(self.root.winfo_geometry()) 
         conf.close()
+        t1.raise_exception()
+        t1.join()
         self.root.destroy()
 
 
-def adding_to_file_name(options):
+def adding_to_file_name(options, number_of_files):
     hot_folder_location = config.get(CONFIG_LOCATION, options)
     hp_hot_folder_location = config.get(CONFIG_OUTPUT, options)
     name_suffix = config.get(CONFIG_SUFFIX, options)
-    for file in os.listdir(hot_folder_location):
-        p = Path(file)
-        new_file_name = "{0}{2}{1}".format(p.stem, p.suffix, name_suffix)
-        if p.suffix == '.txt':
-            shutil.move(f'{hot_folder_location}/{file}', f'{hp_hot_folder_location}/{new_file_name}')
-        else:
-            print('File is not a PDF')
+
+    i = 1
+
+    while i <= number_of_files:
+        for file in os.listdir(hot_folder_location):
+            p = Path(file)
+            new_file_name = "{0}{2}{1}".format(p.stem, p.suffix, name_suffix)
+            if p.suffix == '.txt' or p.suffix == '.pdf':
+                shutil.move(f'{hot_folder_location}/{file}', f'{hp_hot_folder_location}/{new_file_name}')
+                logger_name = f'{file} change to {new_file_name}'
+                logger.log(logging.INFO, msg= logger_name)
+                i += 1
+                time.sleep(2)
+            else:
+                i += 1
+                logger_msg = f'There\'s a non PDF file in {hot_folder_location}. Please remove it.'
+                logger.log(logging.INFO, msg = logger_msg)
         
 
 def create_new_hot_folder(folder_name, folder_input, folder_suffix, folder_output):
@@ -199,7 +209,7 @@ def create_new_hot_folder(folder_name, folder_input, folder_suffix, folder_outpu
     config[CONFIG_LOCATION][new_folder] = f'{new_folder_location}/{new_folder}'
     config[CONFIG_SUFFIX][new_folder] = f'_{new_suffix}'
     config[CONFIG_OUTPUT][new_folder] = new_output_location
-    with open('config Home.ini', 'w') as configFile:
+    with open('config.ini', 'w') as configFile:
         config.write(configFile)
     
     logger.log(logging.INFO, msg= 'Saving folder settings.....')
@@ -211,39 +221,105 @@ def create_new_hot_folder(folder_name, folder_input, folder_suffix, folder_outpu
     app.third.frame.children['folder output entry'].delete(0, END)
     
     
-    
-    
-def main():
-    global app
-    logging.basicConfig(level=logging.DEBUG)
-    root = tk.Tk()
-    app = App(root)
-    app.root.mainloop()
+class main_thread_with_exception(threading.Thread):
+    def __init__(self, name):
+        threading.Thread.__init__(self)
+        self.name = name
+             
+    def run(self):
+ 
+        # target function of the thread class
+        try:
+            while True:
+                main_run()
+        finally:
+            logger.log(logging.INFO, 'Stopping App...')
+          
+    def get_id(self):
+ 
+        # returns id of the respective thread
+        if hasattr(self, '_thread_id'):
+            return self._thread_id
+        for id, thread in threading._active.items():
+            if thread is self:
+                return id
+  
+    def raise_exception(self):
+        thread_id = self.get_id()
+        res = ctypes.pythonapi.PyThreadState_SetAsyncExc(thread_id,
+              ctypes.py_object(SystemExit))
+        if res > 1:
+            ctypes.pythonapi.PyThreadState_SetAsyncExc(thread_id, 0)
+            print('Exception raise failure')
 
 
+class folder_creating_thread_with_exception(threading.Thread):
+    def __init__(self, name):
+        threading.Thread.__init__(self)
+        self.name = name
+             
+    def run(self):
+ 
+        # target function of the thread class
+        try:
+            while True:
+                create_new_hot_folder()
+        finally:
+            logger.log(logging.INFO, 'Stopping App...')
+          
+    def get_id(self):
+ 
+        # returns id of the respective thread
+        if hasattr(self, '_thread_id'):
+            return self._thread_id
+        for id, thread in threading._active.items():
+            if thread is self:
+                return id
+  
+    def raise_exception(self):
+        thread_id = self.get_id()
+        res = ctypes.pythonapi.PyThreadState_SetAsyncExc(thread_id,
+              ctypes.py_object(SystemExit))
+        if res > 1:
+            ctypes.pythonapi.PyThreadState_SetAsyncExc(thread_id, 0)
+            print('Exception raise failure')
 
-if __name__ == "__main__":
+def main_run():
+    get_time = lambda f: os.stat(f).st_birthtime
     
-    main()
-    
-    get_time = lambda f: os.stat(f).st_ctime
-    
-    prev_time = get_time('config Home.ini')
-    
-    
+    prev_time = get_time('config.ini')
+
     while True:
         time.sleep(10)
         
-        t = get_time('config Home.ini')
+        t = get_time('config.ini')
         
         if t != prev_time:
-            config.read('config Home.ini')
+            config.read('config.ini')
         
         configOptions = config.options(CONFIG_LOCATION)
         
         for options in config.options(CONFIG_LOCATION):
             dir_len = len(os.listdir(config.get(CONFIG_LOCATION, options)))
             if dir_len != 0:
-                adding_to_file_name(options)
-            else:
-                print('No file is in Folder')
+                adding_to_file_name(options, dir_len)
+
+
+
+
+def main():
+    global app, t1
+    logging.basicConfig(level=logging.DEBUG)
+    root = tk.Tk()
+    app = App(root)
+
+    logger.log(logging.INFO, msg = 'Starting App')
+    t1 = main_thread_with_exception('run')
+    t1.start()
+
+    app.root.mainloop()
+
+if __name__ == "__main__":
+    
+    main()
+    
