@@ -285,7 +285,7 @@ class folder_creating_thread_with_exception(threading.Thread):
             print('Exception raise failure')
 
 def main_run():
-    get_time = lambda f: os.stat(f).st_birthtime
+    get_time = lambda f: os.stat(f).st_ctime
     
     prev_time = get_time('config.ini')
 
@@ -296,13 +296,25 @@ def main_run():
         
         if t != prev_time:
             config.read('config.ini')
-        
+            prev_time = get_time('config.ini')
+            
         configOptions = config.options(CONFIG_LOCATION)
+            
+        if len(configOptions) == 0:
+            message = 'Please create the first Hot Folder.'
+            logger.log(logging.INFO, msg= message)
+            while len(configOptions) == 0:
+                time.sleep(2)
+                configOptions = config.options(CONFIG_LOCATION)
         
         for options in config.options(CONFIG_LOCATION):
-            dir_len = len(os.listdir(config.get(CONFIG_LOCATION, options)))
-            if dir_len != 0:
-                adding_to_file_name(options, dir_len)
+            try:
+                dir_len = len(os.listdir(config.get(CONFIG_LOCATION, options)))
+                if dir_len != 0:
+                    adding_to_file_name(options, dir_len)
+            except:
+                message = f'Could not find folder: {config.get(CONFIG_LOCATION, options)}. Please go to the config.ini file and correct the folder location'
+                logger.log(logging.INFO, msg = message)
 
 
 
