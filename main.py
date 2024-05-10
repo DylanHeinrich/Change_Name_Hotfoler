@@ -25,6 +25,9 @@ CONFIG_OUTPUT = 'Hot Folder Output'
 CONFIG_LOCATION = 'Hot Folders Location'
 
 PROGRAM_LOCATION = os.getcwd()
+
+folder_options = []
+
 app = None
 t1 = None
 
@@ -94,6 +97,7 @@ class ThirdUi:
         self.folder_location = tk.StringVar()
         self.suffix = tk.StringVar()
         self.folder_output_location = tk.StringVar()
+        self.folder_name_selected = tk.StringVar()
         
         tk.Label(self.frame, text= 'Folder Name').place(x = 240, y = 10)
         tk.Entry(self.frame, textvariable= self.folder_name, width = 35, name = 'folder name entry').pack(pady= 10)
@@ -109,6 +113,8 @@ class ThirdUi:
         self.folder_output_location_entry.pack(pady = 10)
         ttk.Button(self.frame, text = 'Browse', command= lambda: self.browse_folder('output'), bootstyle = 'outline').place(x = 575, y = 130)
         ttk.Button(self.frame, text= 'Create Folder', command= self.create_folder, bootstyle = 'outline').pack(pady = 10)
+        self.folder_name_selected.set("Folder Name")
+        ttk.OptionMenu(self.frame, variable=self.folder_name_selected, *folder_options).place(x = 100, y = 10)
         
         
     def browse_folder(self, entry_name):
@@ -197,7 +203,7 @@ def adding_to_file_name(options, number_of_files):
         
 
 def create_new_hot_folder(folder_name, folder_input, folder_suffix, folder_output):
-    global app
+    global app, folder_options
     new_folder = str(folder_name)
     new_folder_location = str(folder_input)
     new_suffix = str(folder_suffix)
@@ -219,6 +225,9 @@ def create_new_hot_folder(folder_name, folder_input, folder_suffix, folder_outpu
     app.third.frame.children['folder input entry'].delete(0, END)
     app.third.frame.children['folder suffix entry'].delete(0, END)
     app.third.frame.children['folder output entry'].delete(0, END)
+    config.read('config.ini')
+    folder_options.append(new_folder)
+
     
     
 class main_thread_with_exception(threading.Thread):
@@ -320,8 +329,12 @@ def main_run():
 
 
 def main():
-    global app, t1
+    global app, t1, folder_options
     logging.basicConfig(level=logging.DEBUG)
+
+    for options in config.options(CONFIG_LOCATION):
+        folder_options.append(options)
+
     root = tk.Tk()
     app = App(root)
 
